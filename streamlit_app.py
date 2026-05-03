@@ -248,3 +248,11 @@ with right:
 
 st.divider()
 
+with st.expander("Ver matriz de transición estimada (usada en la simulación)", expanded=False):
+    st.caption("Columnas = estado actual, filas = siguiente estado. Cada columna suma 1.")
+    st.dataframe(transition_df.style.format("{:.4f}"), use_container_width=True)
+    col_sums = transition_df.sum(axis=0)
+    st.dataframe(
+        pd.DataFrame({"Suma de columna": col_sums}).T.style.format("{:.4f}"),
+        use_container_width=True,
+    )
