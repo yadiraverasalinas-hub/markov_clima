@@ -180,7 +180,7 @@ if errors:
         st.error(e)
     st.stop()
 
-seed_value = int(semilla) if usar_semilla else None
+seed_value = 2026 if usar_semilla else None
 rng = np.random.default_rng(seed_value)
 
 colA, colB, colC, colD = st.columns(4)
