@@ -147,14 +147,6 @@ with st.sidebar:
 
     st.subheader("Semilla")
     usar_semilla = st.checkbox("Usar semilla fija (reproducible)", value=True)
-    semilla = st.number_input(
-        "Valor de semilla",
-        min_value=0,
-        max_value=2_147_483_647,
-        value=2026,
-        step=1,
-        disabled=not usar_semilla,
-    )
 
     st.subheader("Matriz de transición")
     st.write("Filas = estado actual, columnas = siguiente estado")
