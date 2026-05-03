@@ -186,7 +186,7 @@ rng = np.random.default_rng(seed_value)
 colA, colB, colC, colD = st.columns(4)
 colA.metric("Días", n_dias)
 colB.metric("Estado inicial", f"{estado_inicial} ({NOMBRES_ESTADOS[estado_inicial]})")
-colC.metric("Semilla", seed_value if seed_value is not None else "Aleatoria")
+colC.metric("Semilla", "Fija" if usar_semilla else "Aleatoria")
 colD.metric("Estados", ", ".join(ESTADOS))
 
 st.divider()
