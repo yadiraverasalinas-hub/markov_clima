@@ -156,12 +156,6 @@ with st.sidebar:
     if "transition_df" not in st.session_state:
         st.session_state.transition_df = _default_transition_df()
 
-    edited_df = st.data_editor(
-        st.session_state.transition_df,
-        use_container_width=True,
-        num_rows="fixed",
-        key="transition_editor",
-    )
 
     st.session_state.transition_df = edited_df
 
