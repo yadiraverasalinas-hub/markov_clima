@@ -195,6 +195,13 @@ colD.metric("Estados", ", ".join(ESTADOS))
 st.divider()
 
 if st.button("Generar secuencia", type="primary"):
+    if not usar_semilla:
+        st.session_state.transition_df = _random_transition_df(
+            n_samples=max(200, n_dias),
+            rng=np.random.default_rng(),
+        )
+        transition_df = _normalize_columns(st.session_state.transition_df.copy())
+
     secuencia = simulate_markov_chain(
         n_dias=n_dias,
         estado_inicial=estado_inicial,
@@ -250,9 +257,10 @@ st.divider()
 
 with st.expander("Ver matriz de transición estimada (usada en la simulación)", expanded=False):
     st.caption("Columnas = estado actual, filas = siguiente estado. Cada columna suma 1.")
-    st.dataframe(transition_df.style.format("{:.4f}"), use_container_width=True)
-    col_sums = transition_df.sum(axis=0)
+    transition_df_display = transition_df.round(4)
+    st.dataframe(transition_df_display, use_container_width=True)
+    col_sums = transition_df_display.sum(axis=0)
     st.dataframe(
-        pd.DataFrame({"Suma de columna": col_sums}).T.style.format("{:.4f}"),
+        pd.DataFrame({"Suma de columna": col_sums.round(4)}).T,
         use_container_width=True,
     )
