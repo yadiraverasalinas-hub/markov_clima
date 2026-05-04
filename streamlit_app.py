@@ -57,7 +57,11 @@ def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     col_sums = arr.sum(axis=0, keepdims=True)
     with np.errstate(divide="ignore", invalid="ignore"):
         norm = np.where(col_sums != 0, arr / col_sums, arr)
-    return pd.DataFrame(norm, index=df.index, columns=df.columns)
+    out = pd.DataFrame(norm, index=df.index, columns=df.columns)
+    for col in out.columns:
+        if out[col].sum() != 0:
+            out.loc[out.index[-1], col] = 1.0 - float(out.loc[out.index[:-1], col].sum())
+    return out
 
 
 def _validate_transition_matrix(df: pd.DataFrame) -> list[str]:
@@ -257,10 +261,9 @@ st.divider()
 
 with st.expander("Ver matriz de transición estimada (usada en la simulación)", expanded=False):
     st.caption("Columnas = estado actual, filas = siguiente estado. Cada columna suma 1.")
-    transition_df_display = transition_df.round(4)
-    st.dataframe(transition_df_display, use_container_width=True)
-    col_sums = transition_df_display.sum(axis=0)
+    st.dataframe(transition_df.style.format("{:.3f}"), use_container_width=True)
+    col_sums = transition_df.sum(axis=0)
     st.dataframe(
-        pd.DataFrame({"Suma de columna": col_sums.round(4)}).T,
+        pd.DataFrame({"Suma de columna": col_sums}).T.style.format("{:.3f}"),
         use_container_width=True,
     )
