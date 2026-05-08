@@ -1,135 +1,127 @@
 import numpy as np
 import pandas as pd
-import plotly.express as px
+from collections import Counter
+import matplotlib.pyplot as plt
 import streamlit as st
 
+# ============================================================
+# MÓDULO 1: DEFINICIÓN DE ESTADOS DEL SISTEMA
+# ============================================================
 
-ESTADOS = ["N", "PN", "PS", "S"]
+ESTADOS = ['N', 'PN', 'PS', 'S']
 
 NOMBRES_ESTADOS = {
-    "N": "Nublado",
-    "PN": "Parcialmente Nublado",
-    "PS": "Parcialmente Soleado",
-    "S": "Soleado",
+    'N' : 'Nublado',
+    'PN': 'Parcialmente Nublado',
+    'PS': 'Parcialmente Soleado',
+    'S' : 'Soleado'
 }
 
 COLORES_ESTADOS = {
-    "N": "#607D8B",
-    "PN": "#90A4AE",
-    "PS": "#FFD54F",
-    "S": "#FF8F00",
+    'N' : '#607D8B',
+    'PN': '#90A4AE',
+    'PS': '#FFD54F',
+    'S' : '#FF8F00'
 }
 
+INDICE_ESTADO = {estado: i for i, estado in enumerate(ESTADOS)}
 
-def _generate_random_sequence(n: int, rng: np.random.Generator) -> list[str]:
+# ============================================================
+# MÓDULO 2: GENERACIÓN DE DATOS CLIMÁTICOS SIMULADOS
+# ============================================================
+
+def generar_secuencia_climatica(n_dias: int, usar_semilla: bool) -> list[str]:
+    seed = 2026 if usar_semilla else None
+    rng = np.random.default_rng(seed)
     pesos = np.array([0.35, 0.30, 0.20, 0.15], dtype=float)
     pesos = pesos / pesos.sum()
-    seq = rng.choice(ESTADOS, size=int(n), p=pesos)
+    seq = rng.choice(ESTADOS, size=int(n_dias), p=pesos)
     return [str(s) for s in seq]
 
 
-def _estimate_transition_from_sequence(secuencia: list[str], alpha: float = 1.0) -> pd.DataFrame:
-    # Convención usada en la app:
-    #   columnas = estado actual
-    #   filas    = siguiente estado
-    # por lo tanto cada columna debe sumar 1.
-    idx = {s: i for i, s in enumerate(ESTADOS)}
-    counts = np.zeros((len(ESTADOS), len(ESTADOS)), dtype=float)
-
-    for a, b in zip(secuencia[:-1], secuencia[1:]):
-        j = idx[a]  # estado actual (columna)
-        i = idx[b]  # siguiente estado (fila)
-        counts[i, j] += 1.0
-
-    counts = counts + float(alpha)
-    df = pd.DataFrame(counts, index=ESTADOS, columns=ESTADOS)
-    return _normalize_columns(df)
-
-
-def _random_transition_df(n_samples: int, rng: np.random.Generator) -> pd.DataFrame:
-    base_seq = _generate_random_sequence(n=int(n_samples), rng=rng)
-    return _estimate_transition_from_sequence(base_seq)
-
-
-def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    # Normaliza cada columna para que sume 1.0 (si una columna suma 0, se deja igual)
-    arr = df.to_numpy(dtype=float)
-    col_sums = arr.sum(axis=0, keepdims=True)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        norm = np.where(col_sums != 0, arr / col_sums, arr)
-    out = pd.DataFrame(norm, index=df.index, columns=df.columns)
-    for col in out.columns:
-        if out[col].sum() != 0:
-            out.loc[out.index[-1], col] = 1.0 - float(out.loc[out.index[:-1], col].sum())
-    return out
-
-
-def _validate_transition_matrix(df: pd.DataFrame) -> list[str]:
-    errors: list[str] = []
-
-    if list(df.index) != ESTADOS or list(df.columns) != ESTADOS:
-        errors.append("La matriz debe tener filas y columnas en el orden: N, PN, PS, S.")
-        return errors
-
-    arr = df.to_numpy(dtype=float)
-
-    if np.any(np.isnan(arr)):
-        errors.append("La matriz contiene valores vacíos (NaN).")
-
-    if np.any(arr < 0):
-        errors.append("La matriz contiene probabilidades negativas.")
-
-    col_sums = arr.sum(axis=0)
-    if not np.allclose(col_sums, 1.0, atol=1e-6):
-        errors.append(
-            "Cada columna de la matriz debe sumar 1.0 (o usa la opción de normalizar automáticamente)."
-        )
-
-    return errors
-
-
-def simulate_markov_chain(
-    n_dias: int,
-    estado_inicial: str,
-    transition_df: pd.DataFrame,
-    rng: np.random.Generator,
-) -> list[str]:
-    estados = ESTADOS
-    state_to_idx = {s: i for i, s in enumerate(estados)}
-
-    P = transition_df.to_numpy(dtype=float)
-
-    current = estado_inicial
-    seq = [current]
-
-    for _ in range(n_dias - 1):
-        i = state_to_idx[current]
-        next_state = rng.choice(estados, p=P[:, i])
-        seq.append(str(next_state))
-        current = str(next_state)
-
-    return seq
+def construir_matriz_transicion_df(secuencia: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    A, conteo = construir_matriz_transicion(secuencia)
+    A_df = pd.DataFrame(A, index=ESTADOS, columns=ESTADOS)
+    conteo_df = pd.DataFrame(conteo, index=ESTADOS, columns=ESTADOS)
+    return A_df, conteo_df
 
 
 def build_results_df(secuencia: list[str]) -> pd.DataFrame:
-    n = len(secuencia)
-    return pd.DataFrame(
-        {
-            "Día": range(1, n + 1),
-            "Código": secuencia,
-            "Estado Climático": [NOMBRES_ESTADOS[s] for s in secuencia],
-        }
-    ).set_index("Día")
+    return (
+        pd.DataFrame(
+            {
+                "Día": range(1, len(secuencia) + 1),
+                "Código": secuencia,
+                "Estado Climático": [NOMBRES_ESTADOS[e] for e in secuencia],
+            }
+        )
+        .set_index("Día")
+        .copy()
+    )
 
 
 def build_frequency_df(secuencia: list[str]) -> pd.DataFrame:
-    s = pd.Series(secuencia, name="Código")
-    counts = s.value_counts().reindex(ESTADOS, fill_value=0)
-    df = counts.rename("Días").to_frame()
-    df["Porcentaje"] = (df["Días"] / df["Días"].sum()) * 100
-    df["Estado"] = [NOMBRES_ESTADOS[c] for c in df.index]
-    df["Color"] = [COLORES_ESTADOS[c] for c in df.index]
-    return df.reset_index(drop=False).rename(columns={"index": "Código"})
+    conteo = Counter(secuencia)
+    dias = [conteo.get(e, 0) for e in ESTADOS]
+    total = max(1, len(secuencia))
+    return pd.DataFrame(
+        {
+            "Código": ESTADOS,
+            "Estado": [NOMBRES_ESTADOS[e] for e in ESTADOS],
+            "Días": dias,
+            "Porcentaje": [d / total * 100 for d in dias],
+        }
+    )
+
+
+def crear_vector_estado(estado_actual: str) -> np.ndarray:
+    u0 = np.zeros(len(ESTADOS))
+    u0[INDICE_ESTADO[estado_actual]] = 1.0
+    return u0
+
+
+def predecir_estados_futuros(matriz: np.ndarray, estado_actual: str, pasos: int = 4) -> dict:
+    u = crear_vector_estado(estado_actual)
+    predicciones = {}
+    for paso in range(1, pasos + 1):
+        u = matriz @ u
+        predicciones[f"n+{paso}"] = u.copy()
+    return predicciones
+
+
+# ============================================================
+# MÓDULO 3: CONSTRUCCIÓN DE LA MATRIZ DE TRANSICIÓN
+# ============================================================
+
+def construir_matriz_transicion(secuencia: list) -> tuple:
+    """
+    Construye la matriz de transición de la cadena de Márkov
+    a partir de una secuencia de estados climáticos observados.
+
+    Parámetros:
+    -----------
+    secuencia : list
+        Lista de estados climáticos observados.
+
+    Retorna:
+    --------
+    np.ndarray : Matriz de transición de tamaño 4x4.
+    """
+    n      = len(ESTADOS)
+    conteo = np.zeros((n, n))
+
+    for dia in range(len(secuencia) - 1):
+        j = INDICE_ESTADO[secuencia[dia]]       # estado actual  → columna
+        i = INDICE_ESTADO[secuencia[dia + 1]]   # estado siguiente → fila
+        conteo[i][j] += 1
+
+    matriz = np.zeros((n, n))
+    for j in range(n):
+        total = conteo[:, j].sum()
+        if total > 0:
+            matriz[:, j] = conteo[:, j] / total
+
+    return matriz, conteo
 
 
 st.set_page_config(
@@ -150,105 +142,108 @@ st.markdown(
 )
 
 st.title("Simulador Climático con Cadenas de Markov")
-st.caption("Genera una secuencia de estados: N, PN, PS, S — con matriz de transición configurable.")
+st.caption("Estados: N, PN, PS, S — con matriz estimada desde datos simulados.")
 
 with st.sidebar:
     st.header("Parámetros")
-
     n_dias = st.slider("Número de días", min_value=60, max_value=90, value=75, step=1)
-
-    estado_inicial = st.selectbox(
-        "Estado inicial",
+    usar_semilla = st.checkbox("Usar semilla fija (reproducible)", value=True)
+    estado_dia_n = st.selectbox(
+        "Estado del día n (para predicción)",
         options=ESTADOS,
         format_func=lambda x: f"{x} — {NOMBRES_ESTADOS[x]}",
         index=0,
     )
-
-    st.subheader("Semilla")
-    usar_semilla = st.checkbox("Usar semilla fija (reproducible)", value=True)
-
-
-seed_mode = "fixed" if usar_semilla else "random"
-last_seed_mode = st.session_state.get("transition_seed_mode")
-
-if ("transition_df" not in st.session_state) or (last_seed_mode != seed_mode):
-    seed_value_init = 2026 if usar_semilla else None
-    rng_init = np.random.default_rng(seed_value_init)
-    st.session_state.transition_df = _random_transition_df(n_samples=max(200, n_dias), rng=rng_init)
-    st.session_state.transition_seed_mode = seed_mode
-
-
-transition_df = st.session_state.transition_df.copy()
-transition_df = _normalize_columns(transition_df)
-
-errors = _validate_transition_matrix(transition_df)
-if errors:
-    for e in errors:
-        st.error(e)
-    st.stop()
+    pasos_pred = st.slider("Días a predecir", min_value=1, max_value=10, value=4, step=1)
 
 seed_value = 2026 if usar_semilla else None
-rng = np.random.default_rng(seed_value)
 
 colA, colB, colC, colD = st.columns(4)
 colA.metric("Días", n_dias)
-colB.metric("Estado inicial", f"{estado_inicial} ({NOMBRES_ESTADOS[estado_inicial]})")
+colB.metric("Estado día n", f"{estado_dia_n} ({NOMBRES_ESTADOS[estado_dia_n]})")
 colC.metric("Semilla", "Fija" if usar_semilla else "Aleatoria")
 colD.metric("Estados", ", ".join(ESTADOS))
 
 st.divider()
 
-if st.button("Generar secuencia", type="primary"):
-    if not usar_semilla:
-        st.session_state.transition_df = _random_transition_df(
-            n_samples=max(200, n_dias),
-            rng=np.random.default_rng(),
-        )
-        transition_df = _normalize_columns(st.session_state.transition_df.copy())
+if st.button("Generar simulación", type="primary"):
+    secuencia = generar_secuencia_climatica(n_dias=n_dias, usar_semilla=usar_semilla)
+    st.session_state["secuencia"] = secuencia
 
-    secuencia = simulate_markov_chain(
-        n_dias=n_dias,
-        estado_inicial=estado_inicial,
-        transition_df=transition_df,
-        rng=rng,
-    )
-    st.session_state["last_sequence"] = secuencia
-
-secuencia = st.session_state.get("last_sequence")
-
+secuencia = st.session_state.get("secuencia")
 if secuencia is None:
-    st.info("Configura los parámetros y haz clic en **Generar secuencia**.")
+    st.info("Configura los parámetros y haz clic en **Generar simulación**.")
     st.stop()
 
-results_df = build_results_df(secuencia)
+df_secuencia = build_results_df(secuencia)
 freq_df = build_frequency_df(secuencia)
+A_df, conteo_df = construir_matriz_transicion_df(secuencia)
+
+st.subheader("Vista por días")
+colP, colU = st.columns(2)
+colP.write(f"Primeros 15 días: {secuencia[:15]}")
+colU.write(f"Últimos 15 días: {secuencia[-15:]}")
+
+state_to_idx = {s: i for i, s in enumerate(ESTADOS)}
+y_vals = [state_to_idx[s] for s in secuencia]
+x_vals = list(range(1, len(secuencia) + 1))
+
+fig_timeline, ax_t = plt.subplots(figsize=(12, 3.5))
+ax_t.plot(x_vals, y_vals, color="#9E9E9E", linewidth=1, alpha=0.45)
+
+for code in ESTADOS:
+    xs = [i + 1 for i, s in enumerate(secuencia) if s == code]
+    ys = [state_to_idx[code]] * len(xs)
+    ax_t.scatter(xs, ys, color=COLORES_ESTADOS[code], s=28, label=f"{code} — {NOMBRES_ESTADOS[code]}")
+
+ax_t.set_xlabel("Día")
+ax_t.set_ylabel("Estado")
+ax_t.set_yticks(list(range(len(ESTADOS))))
+ax_t.set_yticklabels([f"{s} — {NOMBRES_ESTADOS[s]}" for s in ESTADOS])
+ax_t.grid(axis="x", alpha=0.1)
+ax_t.grid(axis="y", alpha=0.2)
+ax_t.legend(loc="upper center", bbox_to_anchor=(0.5, -0.25), ncol=2, frameon=False)
+plt.tight_layout()
+st.pyplot(fig_timeline, use_container_width=True)
 
 left, right = st.columns([1.25, 1])
 
 with left:
     st.subheader("Tabla de resultados")
-    st.dataframe(results_df, use_container_width=True, height=520)
+    st.dataframe(df_secuencia, use_container_width=True, height=520)
 
 with right:
     st.subheader("Distribución de frecuencias")
 
-    fig = px.bar(
-        freq_df,
-        x="Estado",
-        y="Días",
-        color="Código",
-        color_discrete_map=COLORES_ESTADOS,
-        text=freq_df["Porcentaje"].map(lambda v: f"{v:.1f}%"),
-    )
-    fig.update_traces(textposition="outside")
-    fig.update_layout(
-        showlegend=False,
-        margin=dict(l=10, r=10, t=10, b=10),
-        yaxis_title="Número de días",
-        xaxis_title=None,
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    fig_bar, ax_bar = plt.subplots(figsize=(8, 4.5))
+    nombres = [NOMBRES_ESTADOS[e] for e in ESTADOS]
+    valores = [int(freq_df.loc[freq_df["Código"] == e, "Días"].iloc[0]) for e in ESTADOS]
+    colores = [COLORES_ESTADOS[e] for e in ESTADOS]
+    barras = ax_bar.bar(nombres, valores, color=colores, edgecolor="white", linewidth=1.2)
 
+    for barra, val in zip(barras, valores):
+        pct = (val / max(1, n_dias)) * 100
+        ax_bar.text(
+            barra.get_x() + barra.get_width() / 2,
+            barra.get_height() + 0.3,
+            f"{val}\n({pct:.1f}%)",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            fontweight="bold",
+        )
+
+    ax_bar.set_ylabel("Número de días", fontsize=10)
+    ax_bar.set_title(
+        f"Distribución de estados climáticos — {n_dias} días simulados",
+        fontsize=11,
+        fontweight="bold",
+    )
+    ax_bar.set_ylim(0, max(valores) * 1.25 if max(valores) > 0 else 1)
+    ax_bar.grid(axis="y", alpha=0.3)
+    plt.xticks(rotation=0)
+    plt.tight_layout()
+    st.pyplot(fig_bar, use_container_width=True)
     st.dataframe(
         freq_df[["Código", "Estado", "Días", "Porcentaje"]].assign(
             Porcentaje=lambda d: d["Porcentaje"].map(lambda v: f"{v:.2f}%")
@@ -261,9 +256,60 @@ st.divider()
 
 with st.expander("Ver matriz de transición estimada (usada en la simulación)", expanded=False):
     st.caption("Columnas = estado actual, filas = siguiente estado. Cada columna suma 1.")
-    st.dataframe(transition_df.style.format("{:.3f}"), use_container_width=True)
-    col_sums = transition_df.sum(axis=0)
-    st.dataframe(
-        pd.DataFrame({"Suma de columna": col_sums}).T.style.format("{:.3f}"),
-        use_container_width=True,
-    )
+    st.dataframe(A_df.style.format("{:.3f}"), use_container_width=True)
+    col_sums = A_df.sum(axis=0)
+    st.dataframe(pd.DataFrame({"Suma de columna": col_sums}).T.style.format("{:.3f}"), use_container_width=True)
+
+    fig_m, ax_m = plt.subplots(figsize=(7, 5))
+    im = ax_m.imshow(A_df.to_numpy(dtype=float), cmap="Purples", vmin=0, vmax=1)
+    fig_m.colorbar(im, ax=ax_m, label="Probabilidad de transición")
+
+    ax_m.set_xticks(range(len(ESTADOS)))
+    ax_m.set_yticks(range(len(ESTADOS)))
+    ax_m.set_xticklabels([f"Desde\n{e}" for e in ESTADOS], fontsize=10)
+    ax_m.set_yticklabels([f"Hacia {e}" for e in ESTADOS], fontsize=10)
+
+    A_np = A_df.to_numpy(dtype=float)
+    for i in range(len(ESTADOS)):
+        for j in range(len(ESTADOS)):
+            color_texto = "white" if A_np[i, j] > 0.45 else "black"
+            ax_m.text(
+                j,
+                i,
+                f"{A_np[i, j]:.3f}",
+                ha="center",
+                va="center",
+                fontsize=11,
+                fontweight="bold",
+                color=color_texto,
+            )
+
+    ax_m.set_title("Matriz de Transición — Cadena de Márkov Climática", fontsize=11, fontweight="bold")
+    plt.tight_layout()
+    st.pyplot(fig_m, use_container_width=True)
+
+with st.expander("Ver conteo de transiciones (observado)", expanded=False):
+    st.dataframe(conteo_df.astype(int), use_container_width=True)
+
+st.subheader("Predicción de estados futuros")
+predicciones = predecir_estados_futuros(A_df.to_numpy(dtype=float), estado_dia_n, pasos=int(pasos_pred))
+
+pred_df = pd.DataFrame(
+    {k: v for k, v in predicciones.items()},
+    index=[f"{e} — {NOMBRES_ESTADOS[e]}" for e in ESTADOS],
+)
+st.dataframe(pred_df.style.format("{:.3f}"), use_container_width=True)
+
+most_prob = []
+for p in range(1, int(pasos_pred) + 1):
+    vec = predicciones[f"n+{p}"]
+    idx_max = int(np.argmax(vec))
+    estado_probable = ESTADOS[idx_max]
+    prob = float(vec[idx_max])
+    most_prob.append({"Día": f"n+{p}", "Más probable": f"{estado_probable} — {NOMBRES_ESTADOS[estado_probable]}", "Probabilidad": prob})
+
+st.dataframe(
+    pd.DataFrame(most_prob).assign(Probabilidad=lambda d: d["Probabilidad"].map(lambda x: f"{x*100:.2f}%")),
+    use_container_width=True,
+    hide_index=True,
+)
