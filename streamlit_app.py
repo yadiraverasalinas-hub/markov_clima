@@ -24,63 +24,106 @@ COLORES_ESTADOS = {
     'S' : '#FF8F00'
 }
 
-INDICE_ESTADO = {estado: i for i, estado in enumerate(ESTADOS)}
+INDICE_ESTADO = {}
+for i, estado in enumerate(ESTADOS):
+    INDICE_ESTADO[estado] = i
 
 # ============================================================
 # MÓDULO 2: GENERACIÓN DE DATOS CLIMÁTICOS SIMULADOS
 # ============================================================
 
 def generar_secuencia_climatica(n_dias: int, usar_semilla: bool) -> list[str]:
-    seed = 2026 if usar_semilla else None
+    """Genera una secuencia aleatoria de estados climáticos.
+
+    - Usa los mismos pesos de tu código original.
+    - Si `usar_semilla` es True, fija la semilla para reproducibilidad.
+    """
+    if usar_semilla:
+        seed = 2026
+    else:
+        seed = None
+
     rng = np.random.default_rng(seed)
+
+    # Pesos: N, PN, PS, S
     pesos = np.array([0.35, 0.30, 0.20, 0.15], dtype=float)
     pesos = pesos / pesos.sum()
+
     seq = rng.choice(ESTADOS, size=int(n_dias), p=pesos)
-    return [str(s) for s in seq]
+
+    # Convertir a lista de strings (por si numpy devuelve tipos distintos)
+    secuencia = []
+    for s in seq:
+        secuencia.append(str(s))
+
+    return secuencia
 
 
 def construir_matriz_transicion_df(secuencia: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Devuelve la matriz de transición A y la matriz de conteos como DataFrames."""
     A, conteo = construir_matriz_transicion(secuencia)
+
     A_df = pd.DataFrame(A, index=ESTADOS, columns=ESTADOS)
     conteo_df = pd.DataFrame(conteo, index=ESTADOS, columns=ESTADOS)
+
     return A_df, conteo_df
 
 
 def build_results_df(secuencia: list[str]) -> pd.DataFrame:
-    return (
-        pd.DataFrame(
-            {
-                "Día": range(1, len(secuencia) + 1),
-                "Código": secuencia,
-                "Estado Climático": [NOMBRES_ESTADOS[e] for e in secuencia],
-            }
-        )
-        .set_index("Día")
-        .copy()
-    )
+    """Tabla día a día: código del estado y nombre del estado."""
+    dias = []
+    codigos = []
+    nombres = []
+
+    for i, codigo in enumerate(secuencia):
+        dias.append(i + 1)
+        codigos.append(codigo)
+        nombres.append(NOMBRES_ESTADOS[codigo])
+
+    df = pd.DataFrame({"Día": dias, "Código": codigos, "Estado Climático": nombres})
+    df = df.set_index("Día")
+    return df
 
 
 def build_frequency_df(secuencia: list[str]) -> pd.DataFrame:
+    """Devuelve frecuencia por estado (días y porcentaje)."""
     conteo = Counter(secuencia)
-    dias = [conteo.get(e, 0) for e in ESTADOS]
     total = max(1, len(secuencia))
-    return pd.DataFrame(
+
+    codigos = []
+    estados = []
+    dias = []
+    porcentajes = []
+
+    for codigo in ESTADOS:
+        d = int(conteo.get(codigo, 0))
+        p = (d / total) * 100
+
+        codigos.append(codigo)
+        estados.append(NOMBRES_ESTADOS[codigo])
+        dias.append(d)
+        porcentajes.append(p)
+
+    df = pd.DataFrame(
         {
-            "Código": ESTADOS,
-            "Estado": [NOMBRES_ESTADOS[e] for e in ESTADOS],
+            "Código": codigos,
+            "Estado": estados,
             "Días": dias,
-            "Porcentaje": [d / total * 100 for d in dias],
+            "Porcentaje": porcentajes,
         }
     )
+    return df
 
 
 def crear_vector_estado(estado_actual: str) -> np.ndarray:
+    """Crea el vector u0 con 1 en el estado actual y 0 en los demás."""
     u0 = np.zeros(len(ESTADOS))
     u0[INDICE_ESTADO[estado_actual]] = 1.0
     return u0
 
 
 def predecir_estados_futuros(matriz: np.ndarray, estado_actual: str, pasos: int = 4) -> dict:
+    """Aplica u_{k+1} = A @ u_k y guarda cada vector n+1, n+2, ..., n+pasos."""
     u = crear_vector_estado(estado_actual)
     predicciones = {}
     for paso in range(1, pasos + 1):
@@ -144,14 +187,23 @@ st.markdown(
 st.title("Simulador Climático con Cadenas de Markov")
 st.caption("Estados: N, PN, PS, S — con matriz estimada desde datos simulados.")
 
+# ============================================================
+# INTERFAZ (STREAMLIT)
+# - Reemplaza los input()/print() de consola por controles en la barra lateral.
+# ============================================================
+
 with st.sidebar:
     st.header("Parámetros")
     n_dias = st.slider("Número de días", min_value=60, max_value=90, value=75, step=1)
     usar_semilla = st.checkbox("Usar semilla fija (reproducible)", value=True)
+    # En vez de usar un lambda, definimos una función normal para el texto.
+    def _formatear_estado(codigo: str) -> str:
+        return f"{codigo} — {NOMBRES_ESTADOS[codigo]}"
+
     estado_dia_n = st.selectbox(
         "Estado del día n (para predicción)",
         options=ESTADOS,
-        format_func=lambda x: f"{x} — {NOMBRES_ESTADOS[x]}",
+        format_func=_formatear_estado,
         index=0,
     )
     pasos_pred = st.slider("Días a predecir", min_value=1, max_value=10, value=4, step=1)
@@ -244,13 +296,13 @@ with right:
     plt.xticks(rotation=0)
     plt.tight_layout()
     st.pyplot(fig_bar, use_container_width=True)
-    st.dataframe(
-        freq_df[["Código", "Estado", "Días", "Porcentaje"]].assign(
-            Porcentaje=lambda d: d["Porcentaje"].map(lambda v: f"{v:.2f}%")
-        ),
-        use_container_width=True,
-        hide_index=True,
-    )
+    freq_mostrar = freq_df[["Código", "Estado", "Días", "Porcentaje"]].copy()
+    porcentajes_texto = []
+    for v in freq_mostrar["Porcentaje"].to_list():
+        porcentajes_texto.append(f"{float(v):.2f}%")
+    freq_mostrar["Porcentaje"] = porcentajes_texto
+
+    st.dataframe(freq_mostrar, use_container_width=True, hide_index=True)
 
 st.divider()
 
@@ -294,10 +346,17 @@ with st.expander("Ver conteo de transiciones (observado)", expanded=False):
 st.subheader("Predicción de estados futuros")
 predicciones = predecir_estados_futuros(A_df.to_numpy(dtype=float), estado_dia_n, pasos=int(pasos_pred))
 
-pred_df = pd.DataFrame(
-    {k: v for k, v in predicciones.items()},
-    index=[f"{e} — {NOMBRES_ESTADOS[e]}" for e in ESTADOS],
-)
+columnas = []
+datos = {}
+for key in predicciones:
+    columnas.append(key)
+    datos[key] = predicciones[key]
+
+index = []
+for e in ESTADOS:
+    index.append(f"{e} — {NOMBRES_ESTADOS[e]}")
+
+pred_df = pd.DataFrame(datos, index=index)
 st.dataframe(pred_df.style.format("{:.3f}"), use_container_width=True)
 
 most_prob = []
@@ -306,10 +365,18 @@ for p in range(1, int(pasos_pred) + 1):
     idx_max = int(np.argmax(vec))
     estado_probable = ESTADOS[idx_max]
     prob = float(vec[idx_max])
-    most_prob.append({"Día": f"n+{p}", "Más probable": f"{estado_probable} — {NOMBRES_ESTADOS[estado_probable]}", "Probabilidad": prob})
+    fila = {
+        "Día": f"n+{p}",
+        "Más probable": f"{estado_probable} — {NOMBRES_ESTADOS[estado_probable]}",
+        "Probabilidad": prob,
+    }
+    most_prob.append(fila)
 
-st.dataframe(
-    pd.DataFrame(most_prob).assign(Probabilidad=lambda d: d["Probabilidad"].map(lambda x: f"{x*100:.2f}%")),
-    use_container_width=True,
-    hide_index=True,
-)
+df_most = pd.DataFrame(most_prob)
+
+prob_texto = []
+for x in df_most["Probabilidad"].to_list():
+    prob_texto.append(f"{float(x) * 100:.2f}%")
+df_most["Probabilidad"] = prob_texto
+
+st.dataframe(df_most, use_container_width=True, hide_index=True)
